@@ -1,45 +1,49 @@
-# Stanford CS336: Language Modeling from Scratch
+# Stanford CS336 Meta Repo
 
-**Spring 2026** — Percy Liang & Tatsunori Hashimoto
+Everything for the class lives here, split by purpose:
 
-Build a complete language model from the ground up.
-
-## Links
-
-- [Course Website](https://stanford-cs336.github.io)
-- [GitHub Organization](https://github.com/stanford-cs336)
-- [YouTube Playlist](https://www.youtube.com/playlist?list=PLoROMvodv4rMqXOcazWaTUHhq-yembLCV)
-
-## Structure
-
-```
-src/cs336/       ← implement these (all raise NotImplementedError)
-reference/       ← complete reference (tutorial scripts + official PDFs)
+```text
+course/       side-by-side map: answer/ and tutorial/ for each assignment
+answers/      your editable working copies
+tutorials/    installed course material: assignments, lectures, official PDFs
+reference/    vendored source archive used by tutorials/
+.ref/         upstream clones, kept hidden
 ```
 
-## Setup
+Start in `course/assignments`:
+
+```text
+course/assignments/01-basics/
+├── answer/     -> your editable assignment 1 copy
+└── tutorial/   -> installed course assignment 1 reference
+```
+
+The same shape exists for:
+
+```text
+01-basics
+02-systems
+03-scaling
+04-data
+05-alignment
+```
+
+Lectures and handouts:
+
+```text
+course/lectures   -> tutorials/lectures
+course/official   -> tutorials/official
+```
+
+## Work Loop
 
 ```bash
-git clone https://github.com/Irvingouj/stanford-cs336.git
-cd stanford-cs336
-uv sync              # core deps (torch, einops, tiktoken, ...)
-uv sync --group dev  # + jupyter, pytest, ruff, mypy
-source .venv/bin/activate
+cd course/assignments/01-basics/answer
+uv run pytest
 ```
 
-## How to practice
+Read the matching tutorial next door:
 
-Read **PRACTICE.md**. Two-step loop:
-
-1. `python reference/lectures/lecture_XX_*.py` — understand the concept
-2. Open `src/cs336/` — implement it yourself
-
-## GPU compute (for self-study)
-
-- [Modal](https://modal.com) — course sponsor, $30 free/month
-- [Lambda Labs](https://lambdalabs.com) | [RunPod](https://runpod.io) | [Nebius](https://nebius.com)
-
-Triton & FlashAttention (Linux only):
 ```bash
-uv sync --group triton --group flash
+open ../tutorial/cs336_assignment1_basics.pdf
 ```
