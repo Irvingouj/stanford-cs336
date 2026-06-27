@@ -8,6 +8,6 @@ Topics:
 - Byte-level vs character-level vs subword
 """
 
-# Re-exports as we implement them
-# from cs336.tokenizer.bpe import BPETokenizer
-# from cs336.tokenizer.byte_level import ByteLevelTokenizer
+from cs336.tokenizer.bpe import BPETokenizer, get_tokenizer, run_train_bpe
+
+__all__ = ["BPETokenizer", "get_tokenizer", "run_train_bpe"]

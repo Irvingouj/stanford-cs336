@@ -8,5 +8,6 @@ Topics:
   parallelism, FSDP, ZeRO
 """
 
-# from cs336.systems.kernels import FlashAttention2Kernel
-# from cs336.systems.parallel import DataParallel, TensorParallel
+from cs336.systems.kernels import run_ddp, run_flash_attention2, run_fsdp
+
+__all__ = ["run_ddp", "run_flash_attention2", "run_fsdp"]
