@@ -8,8 +8,11 @@ Implements the interfaces expected by CS336 Assignment 1:
 - Transformer block
 - Transformer LM (full model)
 
+All functions raise NotImplementedError — implement them yourself.
+
 Reference:
     https://github.com/stanford-cs336/assignment1-basics
+    https://arxiv.org/abs/1706.03762 (Attention Is All You Need)
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-# ── Normalization layers ────────────────────────────────────────────────
+# ── Normalization ──────────────────────────────────────────────────────
 
 
 def run_rmsnorm(
@@ -42,9 +45,7 @@ def run_rmsnorm(
     Returns:
         normalized tensor (..., d_model)
     """
-    # RMS = sqrt(mean(x^2))
-    rms = torch.sqrt(torch.mean(in_features.float() ** 2, dim=-1, keepdim=True) + eps)
-    return (in_features / rms) * weights
+    raise NotImplementedError("TODO: implement RMSNorm")
 
 
 class RMSNorm(nn.Module):
@@ -55,18 +56,18 @@ class RMSNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x: Tensor) -> Tensor:
-        return run_rmsnorm(x.shape[-1], self.eps, self.weight, x)
+        raise NotImplementedError("TODO: implement RMSNorm.forward")
 
 
-# ── Activation functions ────────────────────────────────────────────────
+# ── Activation ─────────────────────────────────────────────────────────
 
 
 def run_silu(in_features: Tensor) -> Tensor:
     """SiLU (Sigmoid Linear Unit) = x * sigmoid(x)."""
-    return in_features * torch.sigmoid(in_features)
+    raise NotImplementedError("TODO: implement SiLU")
 
 
-# ── Linear layer ────────────────────────────────────────────────────────
+# ── Linear ─────────────────────────────────────────────────────────────
 
 
 def run_linear(
@@ -75,7 +76,7 @@ def run_linear(
     weights: Tensor,  # (d_out, d_in)
     in_features: Tensor,  # (..., d_in)
 ) -> Tensor:
-    """Apply a linear transformation.
+    """Apply a linear transformation: out = in_features @ weights^T.
 
     Args:
         d_in: input feature dimension
@@ -86,10 +87,10 @@ def run_linear(
     Returns:
         output (..., d_out)
     """
-    return F.linear(in_features, weights)
+    raise NotImplementedError("TODO: implement linear transformation")
 
 
-# ── Embedding ───────────────────────────────────────────────────────────
+# ── Embedding ──────────────────────────────────────────────────────────
 
 
 def run_embedding(
@@ -98,7 +99,7 @@ def run_embedding(
     weights: Tensor,  # (vocab_size, d_model)
     token_ids: Tensor,  # (...)
 ) -> Tensor:
-    """Look up token embeddings.
+    """Look up token embeddings from a weight matrix.
 
     Args:
         vocab_size: number of embeddings
@@ -109,10 +110,10 @@ def run_embedding(
     Returns:
         embeddings (..., d_model)
     """
-    return F.embedding(token_ids, weights)
+    raise NotImplementedError("TODO: implement embedding lookup")
 
 
-# ── SwiGLU feed-forward ─────────────────────────────────────────────────
+# ── SwiGLU ─────────────────────────────────────────────────────────────
 
 
 def run_swiglu(
@@ -129,16 +130,16 @@ def run_swiglu(
 
     Args:
         d_model: input/output dimension
-        d_ff: hidden dimension (typically 8/3 * d_model rounded to multiple of 256)
-        w1_weight, w2_weight, w3_weight: SwiGLU weight matrices
+        d_ff: hidden dimension
+        w1_weight: gate projection (d_ff, d_model)
+        w2_weight: output projection (d_model, d_ff)
+        w3_weight: up projection (d_ff, d_model)
         in_features: input (..., d_model)
 
     Returns:
         output (..., d_model)
     """
-    gate = run_silu(F.linear(in_features, w1_weight))  # (..., d_ff)
-    up = F.linear(in_features, w3_weight)               # (..., d_ff)
-    return F.linear(gate * up, w2_weight)               # (..., d_model)
+    raise NotImplementedError("TODO: implement SwiGLU")
 
 
 class SwiGLU(nn.Module):
@@ -146,7 +147,6 @@ class SwiGLU(nn.Module):
     def __init__(self, d_model: int, d_ff: int | None = None):
         super().__init__()
         if d_ff is None:
-            # LLaMA convention: 8/3 * d_model, rounded to multiple of 256
             d_ff = int(8 / 3 * d_model)
             d_ff = ((d_ff + 255) // 256) * 256
         self.w1 = nn.Linear(d_model, d_ff, bias=False)
@@ -154,45 +154,37 @@ class SwiGLU(nn.Module):
         self.w3 = nn.Linear(d_model, d_ff, bias=False)
 
     def forward(self, x: Tensor) -> Tensor:
-        return run_swiglu(x.shape[-1], self.w1.out_features,
-                          self.w1.weight, self.w2.weight, self.w3.weight, x)
+        raise NotImplementedError("TODO: implement SwiGLU.forward")
 
 
-# ── Scaled dot-product attention ────────────────────────────────────────
+# ── Scaled Dot-Product Attention ───────────────────────────────────────
 
 
 def run_scaled_dot_product_attention(
     Q: Tensor,  # (..., queries, d_k)
     K: Tensor,  # (..., keys, d_k)
     V: Tensor,  # (..., keys, d_v)
-    mask: Tensor | None = None,  # (..., queries, keys)
+    mask: Tensor | None = None,  # (..., queries, keys) or None
 ) -> Tensor:
     """Scaled dot-product attention.
 
     Attention(Q, K, V) = softmax(Q @ K^T / sqrt(d_k) + mask) @ V
 
+    The mask is bool: True = masked position (set to -inf before softmax).
+
     Args:
         Q: queries
         K: keys
         V: values
-        mask: optional attention mask (True = masked position)
+        mask: optional attention mask
 
     Returns:
         attention output (..., queries, d_v)
     """
-    d_k = Q.shape[-1]
-    scale = d_k ** -0.5
-
-    scores = torch.matmul(Q, K.transpose(-2, -1)) * scale  # (..., queries, keys)
-
-    if mask is not None:
-        scores = scores.masked_fill(mask, float("-inf"))
-
-    attn_weights = F.softmax(scores, dim=-1)
-    return torch.matmul(attn_weights, V)
+    raise NotImplementedError("TODO: implement scaled dot-product attention")
 
 
-# ── RoPE (Rotary Position Embedding) ────────────────────────────────────
+# ── RoPE (Rotary Position Embedding) ───────────────────────────────────
 
 
 def run_rope(
@@ -202,44 +194,27 @@ def run_rope(
     in_query_or_key: Tensor,  # (..., seq_len, d_k)
     token_positions: Tensor,  # (..., seq_len)
 ) -> Tensor:
-    """Apply Rotary Position Embedding.
+    """Apply Rotary Position Embedding (RoPE).
 
-    RoPE rotates pairs of dimensions by position-dependent angles.
-    angle_i = position * theta^(-2i/d_k)
+    RoPE encodes position by rotating pairs of feature dimensions.
+    angle_i = position / theta^(2i/d_k)
+
+    Hint: treat adjacent dimension pairs as (real, imag) and rotate them.
 
     Args:
         d_k: head dimension
-        theta: base frequency (e.g. 10000.0)
-        max_seq_len: max sequence length for pre-computation
+        theta: base frequency (e.g., 10000.0)
+        max_seq_len: max sequence length (for pre-computation)
         in_query_or_key: Q or K tensor (..., seq_len, d_k)
         token_positions: position indices (..., seq_len)
 
     Returns:
         RoPE-transformed tensor (..., seq_len, d_k)
     """
-    # Compute frequencies: (d_k // 2,)
-    i = torch.arange(0, d_k // 2, device=in_query_or_key.device, dtype=torch.float32)
-    freqs = 1.0 / (theta ** (2 * i / d_k))  # (d_k // 2,)
-
-    # Position-dependent angles: (..., seq_len, d_k // 2)
-    angles = token_positions.unsqueeze(-1).float() * freqs  # (..., seq_len, d_k // 2)
-
-    cos = torch.cos(angles).unsqueeze(-1)  # (..., seq_len, d_k // 2, 1)
-    sin = torch.sin(angles).unsqueeze(-1)
-
-    # Split input into pairs
-    x_2d = in_query_or_key.float().view(*in_query_or_key.shape[:-1], d_k // 2, 2)
-    x1, x2 = x_2d[..., 0], x_2d[..., 1]  # (..., seq_len, d_k // 2)
-
-    # Rotate: (x1 + i*x2) * (cos + i*sin) = (x1*cos - x2*sin, x1*sin + x2*cos)
-    rotated_1 = x1 * cos.squeeze(-1) - x2 * sin.squeeze(-1)
-    rotated_2 = x1 * sin.squeeze(-1) + x2 * cos.squeeze(-1)
-
-    result = torch.stack([rotated_1, rotated_2], dim=-1)
-    return result.view_as(in_query_or_key).type_as(in_query_or_key)
+    raise NotImplementedError("TODO: implement RoPE")
 
 
-# ── Multi-head self-attention ───────────────────────────────────────────
+# ── Multi-Head Self-Attention ──────────────────────────────────────────
 
 
 def run_multihead_self_attention(
@@ -251,47 +226,25 @@ def run_multihead_self_attention(
     o_proj_weight: Tensor,  # (d_model, d_model)
     in_features: Tensor,  # (..., seq_len, d_model)
 ) -> Tensor:
-    """Multi-head self-attention (without RoPE).
+    """Multi-head self-attention (WITHOUT RoPE).
+
+    Steps:
+    1. Project Q, K, V from in_features (one matmul each, for all heads)
+    2. Reshape to separate heads: (..., num_heads, seq_len, head_dim)
+    3. Apply causal mask
+    4. Call run_scaled_dot_product_attention
+    5. Reassemble heads and apply output projection
 
     Args:
         d_model: model dimension
-        num_heads: number of attention heads
-        q_proj_weight, k_proj_weight, v_proj_weight: Q/K/V projection weights
-        o_proj_weight: output projection weights
+        num_heads: number of attention heads (d_model % num_heads == 0)
+        q/k/v/o_proj_weight: projection weights
         in_features: input (..., seq_len, d_model)
 
     Returns:
         attention output (..., seq_len, d_model)
     """
-    *batch_dims, seq_len, _ = in_features.shape
-    head_dim = d_model // num_heads
-
-    # Project Q, K, V in one go
-    Q = F.linear(in_features, q_proj_weight)  # (..., seq_len, d_model)
-    K = F.linear(in_features, k_proj_weight)
-    V = F.linear(in_features, v_proj_weight)
-
-    # Reshape to (..., num_heads, seq_len, head_dim)
-    Q = Q.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-    K = K.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-    V = V.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-
-    # Causal mask
-    causal_mask = torch.triu(
-        torch.ones(seq_len, seq_len, device=in_features.device, dtype=torch.bool),
-        diagonal=1,
-    )
-
-    # Scaled dot-product attention
-    attn_out = run_scaled_dot_product_attention(Q, K, V, mask=causal_mask)
-    # (..., num_heads, seq_len, head_dim)
-
-    # Reassemble heads
-    attn_out = attn_out.transpose(-2, -3).contiguous()
-    attn_out = attn_out.view(*batch_dims, seq_len, d_model)
-
-    # Output projection
-    return F.linear(attn_out, o_proj_weight)
+    raise NotImplementedError("TODO: implement multi-head self-attention")
 
 
 def run_multihead_self_attention_with_rope(
@@ -306,43 +259,17 @@ def run_multihead_self_attention_with_rope(
     in_features: Tensor,  # (..., seq_len, d_model)
     token_positions: Tensor | None = None,  # (..., seq_len)
 ) -> Tensor:
-    """Multi-head self-attention with RoPE.
+    """Multi-head self-attention WITH RoPE.
 
-    Same as run_multihead_self_attention but applies RoPE to Q and K before attention.
+    Same as run_multihead_self_attention, but apply run_rope to Q and K
+    after projection and before attention.
+
+    If token_positions is None, create positions 0..seq_len-1.
     """
-    *batch_dims, seq_len, _ = in_features.shape
-    head_dim = d_model // num_heads
-
-    if token_positions is None:
-        token_positions = torch.arange(seq_len, device=in_features.device)
-        token_positions = token_positions.expand(*batch_dims, seq_len)
-
-    Q = F.linear(in_features, q_proj_weight)
-    K = F.linear(in_features, k_proj_weight)
-    V = F.linear(in_features, v_proj_weight)
-
-    Q = Q.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-    K = K.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-    V = V.view(*batch_dims, seq_len, num_heads, head_dim).transpose(-2, -3)
-
-    # Apply RoPE to Q and K
-    Q = run_rope(head_dim, theta, max_seq_len, Q, token_positions)
-    K = run_rope(head_dim, theta, max_seq_len, K, token_positions)
-
-    causal_mask = torch.triu(
-        torch.ones(seq_len, seq_len, device=in_features.device, dtype=torch.bool),
-        diagonal=1,
-    )
-
-    attn_out = run_scaled_dot_product_attention(Q, K, V, mask=causal_mask)
-
-    attn_out = attn_out.transpose(-2, -3).contiguous()
-    attn_out = attn_out.view(*batch_dims, seq_len, d_model)
-
-    return F.linear(attn_out, o_proj_weight)
+    raise NotImplementedError("TODO: implement multi-head self-attention with RoPE")
 
 
-# ── Transformer block ───────────────────────────────────────────────────
+# ── Transformer Block ──────────────────────────────────────────────────
 
 
 def run_transformer_block(
@@ -356,38 +283,31 @@ def run_transformer_block(
 ) -> Tensor:
     """A single pre-norm Transformer block with RoPE.
 
-    Weights dict keys (see adapters.py for full docs):
+    Architecture:
+        x = x + MHA_with_RoPE(RMSNorm(x))
+        x = x + SwiGLU(RMSNorm(x))
+
+    Weights dict keys:
         attn.q_proj.weight, attn.k_proj.weight, attn.v_proj.weight,
         attn.output_proj.weight, ln1.weight, ln2.weight,
         ffn.w1.weight, ffn.w2.weight, ffn.w3.weight
+
+    Args:
+        d_model: hidden dimension
+        num_heads: attention heads
+        d_ff: FFN hidden dimension
+        max_seq_len: max sequence length
+        theta: RoPE base frequency
+        weights: state dict with the keys listed above
+        in_features: input (batch, seq_len, d_model)
+
+    Returns:
+        output (batch, seq_len, d_model)
     """
-    # Self-attention sublayer (pre-norm)
-    residual = in_features
-    x = run_rmsnorm(d_model, 1e-6, weights["ln1.weight"], in_features)
-    x = run_multihead_self_attention_with_rope(
-        d_model, num_heads, max_seq_len, theta,
-        weights["attn.q_proj.weight"],
-        weights["attn.k_proj.weight"],
-        weights["attn.v_proj.weight"],
-        weights["attn.output_proj.weight"],
-        x,
-    )
-    x = x + residual
-
-    # FFN sublayer (pre-norm)
-    residual = x
-    x = run_rmsnorm(d_model, 1e-6, weights["ln2.weight"], x)
-    x = run_swiglu(
-        d_model, d_ff,
-        weights["ffn.w1.weight"],
-        weights["ffn.w2.weight"],
-        weights["ffn.w3.weight"],
-        x,
-    )
-    return x + residual
+    raise NotImplementedError("TODO: implement transformer block")
 
 
-# ── Full Transformer LM ─────────────────────────────────────────────────
+# ── Full Transformer LM ────────────────────────────────────────────────
 
 
 def run_transformer_lm(
@@ -403,13 +323,19 @@ def run_transformer_lm(
 ) -> Tensor:
     """Full Transformer language model forward pass.
 
+    Architecture:
+        embed = token_embedding(input_ids)
+        for each layer: embed = transformer_block(embed)
+        embed = RMSNorm(embed)
+        logits = lm_head(embed)
+
     Weights dict keys:
         token_embeddings.weight, lm_head.weight, ln_final.weight,
         layers.{i}.attn.q_proj.weight, layers.{i}.attn.k_proj.weight,
         layers.{i}.attn.v_proj.weight, layers.{i}.attn.output_proj.weight,
         layers.{i}.ln1.weight, layers.{i}.ln2.weight,
         layers.{i}.ffn.w1.weight, layers.{i}.ffn.w2.weight,
-        layers.{i}.ffn.w3.weight
+        layers.{i}.ffn.w3.weight    (for i in 0..num_layers-1)
 
     Args:
         vocab_size: vocabulary size
@@ -425,33 +351,4 @@ def run_transformer_lm(
     Returns:
         logits (batch, seq_len, vocab_size)
     """
-    batch_size, seq_len = in_indices.shape
-
-    # Token embeddings
-    x = run_embedding(vocab_size, d_model, weights["token_embeddings.weight"], in_indices)
-
-    # Transformer blocks
-    for layer_idx in range(num_layers):
-        prefix = f"layers.{layer_idx}."
-        layer_weights = {
-            "attn.q_proj.weight": weights[prefix + "attn.q_proj.weight"],
-            "attn.k_proj.weight": weights[prefix + "attn.k_proj.weight"],
-            "attn.v_proj.weight": weights[prefix + "attn.v_proj.weight"],
-            "attn.output_proj.weight": weights[prefix + "attn.output_proj.weight"],
-            "ln1.weight": weights[prefix + "ln1.weight"],
-            "ln2.weight": weights[prefix + "ln2.weight"],
-            "ffn.w1.weight": weights[prefix + "ffn.w1.weight"],
-            "ffn.w2.weight": weights[prefix + "ffn.w2.weight"],
-            "ffn.w3.weight": weights[prefix + "ffn.w3.weight"],
-        }
-        x = run_transformer_block(
-            d_model, num_heads, d_ff,
-            context_length, rope_theta,
-            layer_weights, x,
-        )
-
-    # Final norm
-    x = run_rmsnorm(d_model, 1e-6, weights["ln_final.weight"], x)
-
-    # LM head
-    return F.linear(x, weights["lm_head.weight"])
+    raise NotImplementedError("TODO: implement full transformer LM forward pass")

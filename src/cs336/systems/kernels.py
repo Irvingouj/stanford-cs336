@@ -1,13 +1,14 @@
 """
 Systems — FlashAttention, DDP, FSDP.
 
-Implements interfaces from CS336 Assignment 2:
-- run_flash_attention2(): Triton FlashAttention2 kernel
-- run_ddp(): DistributedDataParallel training step
-- run_fsdp(): FullyShardedDataParallel wrapping
+Implements interfaces from CS336 Assignment 2.
+
+All functions raise NotImplementedError — implement them yourself.
 
 Reference:
     https://github.com/stanford-cs336/assignment2-systems
+    FlashAttention: Dao et al., https://arxiv.org/abs/2205.14135
+    FlashAttention-2: Dao, https://arxiv.org/abs/2307.08691
 """
 
 from __future__ import annotations
@@ -33,11 +34,16 @@ def run_flash_attention2(
     Key ideas:
     - Tile Q into blocks, iterate over K/V blocks
     - Maintain online softmax statistics (m, l) per Q block
-    - Fuse all operations in a single Triton/CUDA kernel
-    - Avoid materializing the full NxN attention matrix
+    - Fuse operations in a single Triton/CUDA kernel
+    - Avoid materializing the full N×N attention matrix
 
-    For Triton implementation, see the lecture_06 script and
-    the official assignment handout.
+    For the real Triton implementation:
+    1. Compute Q @ K^T in tiles
+    2. Online softmax: update running max and sum per Q-block
+    3. Accumulate weighted V in tiles
+    4. Normalize at the end
+
+    Triton is Linux-only. Install: uv sync --group triton
 
     Args:
         Q: queries (batch, n_heads, seq_len, head_dim)
@@ -48,11 +54,7 @@ def run_flash_attention2(
     Returns:
         attention output (batch, n_heads, seq_len, head_dim)
     """
-    # TODO: implement with Triton kernel
-    # Fallback: use PyTorch's scaled_dot_product_attention (cuDNN FA backend)
-    return torch.nn.functional.scaled_dot_product_attention(
-        Q, K, V, is_causal=causal,
-    )
+    raise NotImplementedError("TODO: implement FlashAttention2 in Triton")
 
 
 # ── Distributed Data Parallel ───────────────────────────────────────────
@@ -70,7 +72,7 @@ def run_ddp(
     1. Forward pass on local micro-batch
     2. Compute loss
     3. Backward pass
-    4. All-reduce gradients across ranks
+    4. All-reduce gradients across ranks (use dist.all_reduce with AVG)
     5. Return loss and gradients
 
     Args:
@@ -82,29 +84,7 @@ def run_ddp(
     Returns:
         (loss, grad_dict) — averaged loss and gradients
     """
-    inputs, labels = local_batch
-
-    # Forward
-    logits = model(inputs)
-    loss = torch.nn.functional.cross_entropy(
-        logits.view(-1, logits.size(-1)), labels.view(-1)
-    )
-
-    # Backward
-    loss.backward()
-
-    # All-reduce gradients
-    for param in model.parameters():
-        if param.grad is not None:
-            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
-
-    grads = {
-        name: param.grad.clone()
-        for name, param in model.named_parameters()
-        if param.grad is not None
-    }
-
-    return loss, grads
+    raise NotImplementedError("TODO: implement DDP training step")
 
 
 # ── FSDP (Fully Sharded Data Parallel) ──────────────────────────────────
@@ -120,13 +100,22 @@ def run_fsdp(
     One FSDP training step (ZeRO-3 style).
 
     Key differences from DDP:
-    - Parameters, gradients, and optimizer states are sharded across GPUs
-    - All-gather parameters before forward pass
-    - Reduce-scatter gradients after backward pass
+    - Parameters, gradients, and optimizer states are SHARDED across GPUs
+    - All-gather parameters before forward (dist.all_gather)
+    - Forward with full parameters
     - Discard full parameters to free memory
+    - Backward: compute grad w.r.t. full parameters
+    - Reduce-scatter gradients (dist.reduce_scatter) — only keep your shard
+
+    Pseudocode for one layer:
+        1. all_gather(sharded_W) → full_W
+        2. forward with full_W
+        3. discard full_W
+        4. backward: grad w.r.t. full_W
+        5. reduce_scatter(full_grad) → sharded_grad (keep only your piece)
 
     Args:
-        model: the model (wrapped with FSDP)
+        model: the model (parameters sharded across ranks)
         local_batch: (inputs, labels) for this rank
         world_size: total GPUs
         rank: local rank
@@ -134,14 +123,4 @@ def run_fsdp(
     Returns:
         (loss, grad_dict)
     """
-    # FSDP is typically handled by PyTorch's FSDP wrapper or DeepSpeed ZeRO-3.
-    # Students implement the all-gather / reduce-scatter logic manually.
-    #
-    # Pseudocode for one layer:
-    # 1. all_gather(sharded_W) → full_W
-    # 2. forward with full_W
-    # 3. discard full_W
-    # 4. backward: compute grad w.r.t. full_W
-    # 5. reduce_scatter(full_grad) → sharded_grad  # only keep your shard
-    #
     raise NotImplementedError("TODO: implement FSDP all-gather/reduce-scatter")

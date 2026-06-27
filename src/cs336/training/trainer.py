@@ -1,11 +1,12 @@
 """
-Training utilities — optimizer, learning rate schedule, gradient clipping.
+Training utilities — optimizer, learning rate schedule, gradient clipping,
+checkpointing, data loading.
 
-Implements the interfaces expected by CS336 Assignment 1:
-- get_adamw_cls(): AdamW optimizer from scratch
-- run_get_lr_cosine_schedule(): cosine LR with linear warmup
-- run_gradient_clipping(): gradient norm clipping
-- run_save_checkpoint() / run_load_checkpoint(): serialization
+All functions raise NotImplementedError — implement them yourself.
+
+Reference:
+    https://github.com/stanford-cs336/assignment1-basics
+    AdamW: Loshchilov & Hutter, "Decoupled Weight Decay Regularization", 2017
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import struct
 from collections.abc import Iterable
 from typing import IO, Any, BinaryIO
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -29,26 +31,18 @@ def run_gradient_clipping(
     parameters: Iterable[nn.Parameter],
     max_l2_norm: float,
 ) -> None:
-    """Clip gradients to have L2 norm at most max_l2_norm.
+    """Clip gradients so their combined L2 norm is at most max_l2_norm.
 
-    Modifies parameter.grad in-place.
+    Modifies parameter.grad in-place. Skip parameters where .grad is None.
+
+    total_norm = sqrt(sum(p.grad^2 for all p))
+    if total_norm > max_l2_norm: scale all grads by max_l2_norm / total_norm
+
+    Args:
+        parameters: trainable parameters with .grad attributes
+        max_l2_norm: maximum allowed L2 norm
     """
-    if max_l2_norm <= 0:
-        return
-
-    total_norm = torch.sqrt(
-        sum(
-            torch.sum(p.grad.detach() ** 2)
-            for p in parameters
-            if p.grad is not None
-        )
-    )
-
-    if total_norm > max_l2_norm:
-        scale = max_l2_norm / (total_norm + 1e-6)
-        for p in parameters:
-            if p.grad is not None:
-                p.grad.detach().mul_(scale)
+    raise NotImplementedError("TODO: implement gradient clipping")
 
 
 # ── Cosine learning rate schedule ───────────────────────────────────────
@@ -63,30 +57,21 @@ def run_get_lr_cosine_schedule(
 ) -> float:
     """Cosine learning rate schedule with linear warmup.
 
-    - Linear warmup from 0 to max_lr over warmup_iters
-    - Cosine decay from max_lr to min_lr over cosine_cycle_iters
+    - it < warmup_iters:               linear from 0 to max_learning_rate
+    - warmup_iters <= it <= cosine_cycle_iters:  cosine decay to min_learning_rate
+    - it > cosine_cycle_iters:          min_learning_rate
 
     Args:
-        it: current iteration
+        it: current iteration (0-indexed)
         max_learning_rate: peak LR (alpha_max)
         min_learning_rate: final LR (alpha_min)
-        warmup_iters: warmup duration (T_w)
-        cosine_cycle_iters: cosine annealing duration (T_c)
+        warmup_iters: warmup steps (T_w)
+        cosine_cycle_iters: total cosine steps (T_c)
 
     Returns:
-        learning rate at iteration it
+        learning rate at iteration `it`
     """
-    if it < warmup_iters:
-        # Linear warmup
-        return max_learning_rate * (it + 1) / warmup_iters
-    elif it <= cosine_cycle_iters:
-        # Cosine decay
-        progress = (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)
-        return min_learning_rate + 0.5 * (max_learning_rate - min_learning_rate) * (
-            1.0 + math.cos(math.pi * progress)
-        )
-    else:
-        return min_learning_rate
+    raise NotImplementedError("TODO: implement cosine LR schedule")
 
 
 # ── AdamW optimizer ─────────────────────────────────────────────────────
@@ -95,8 +80,13 @@ def run_get_lr_cosine_schedule(
 class AdamW(torch.optim.Optimizer):
     """AdamW optimizer implemented from scratch.
 
-    AdamW decouples weight decay from the gradient update:
-        θ_{t+1} = θ_t - lr * (m_hat / (sqrt(v_hat) + eps) + wd * θ_t)
+    AdamW decouples weight decay from gradient updates:
+
+        m_t     = beta1 * m_{t-1} + (1 - beta1) * g_t
+        v_t     = beta2 * v_{t-1} + (1 - beta2) * g_t^2
+        m_hat   = m_t / (1 - beta1^t)
+        v_hat   = v_t / (1 - beta2^t)
+        theta_t = theta_{t-1} - lr * (m_hat / (sqrt(v_hat) + eps) + wd * theta_{t-1})
 
     Reference: Loshchilov & Hutter, "Decoupled Weight Decay Regularization", 2017.
     """
@@ -109,57 +99,16 @@ class AdamW(torch.optim.Optimizer):
         eps: float = 1e-8,
         weight_decay: float = 0.01,
     ):
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
-        super().__init__(params, defaults)
+        raise NotImplementedError("TODO: implement AdamW.__init__")
 
     @torch.no_grad()
     def step(self, closure=None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        for group in self.param_groups:
-            lr = group["lr"]
-            beta1, beta2 = group["betas"]
-            eps = group["eps"]
-            wd = group["weight_decay"]
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                grad = p.grad
-
-                # State initialization
-                state = self.state[p]
-                if len(state) == 0:
-                    state["step"] = 0
-                    state["m"] = torch.zeros_like(p)
-                    state["v"] = torch.zeros_like(p)
-
-                m, v = state["m"], state["v"]
-                state["step"] += 1
-                t = state["step"]
-
-                # Update biased moments
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
-                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-                # Bias correction
-                m_hat = m / (1 - beta1 ** t)
-                v_hat = v / (1 - beta2 ** t)
-
-                # AdamW update (decoupled weight decay)
-                p.mul_(1 - lr * wd)
-                p.addcdiv_(m_hat, v_hat.sqrt().add_(eps), value=-lr)
-
-        return loss
+        raise NotImplementedError("TODO: implement AdamW.step")
 
 
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """Return the AdamW optimizer class."""
-    return AdamW
+    raise NotImplementedError("TODO: return AdamW class")
 
 
 # ── Checkpointing ───────────────────────────────────────────────────────
@@ -171,20 +120,18 @@ def run_save_checkpoint(
     iteration: int,
     out: str | os.PathLike | BinaryIO | IO[bytes],
 ) -> None:
-    """Save model, optimizer state, and iteration to a checkpoint file.
+    """Save model state, optimizer state, and iteration to disk.
+
+    Hint: torch.save() a dict with keys 'model_state_dict',
+    'optimizer_state_dict', 'iteration'.
 
     Args:
-        model: the model to serialize
-        optimizer: the optimizer to serialize
-        iteration: current training iteration
+        model: the model
+        optimizer: the optimizer
+        iteration: current training step
         out: destination path or file-like object
     """
-    checkpoint = {
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "iteration": iteration,
-    }
-    torch.save(checkpoint, out)
+    raise NotImplementedError("TODO: implement save_checkpoint")
 
 
 def run_load_checkpoint(
@@ -192,7 +139,7 @@ def run_load_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
 ) -> int:
-    """Load model, optimizer state, and iteration from a checkpoint.
+    """Load model, optimizer, and iteration from a checkpoint.
 
     Args:
         src: checkpoint path or file-like object
@@ -202,15 +149,10 @@ def run_load_checkpoint(
     Returns:
         iteration number from the checkpoint
     """
-    checkpoint = torch.load(src, weights_only=True)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    return checkpoint["iteration"]
+    raise NotImplementedError("TODO: implement load_checkpoint")
 
 
 # ── Data loading ────────────────────────────────────────────────────────
-
-import numpy as np
 
 
 def run_get_batch(
@@ -219,7 +161,13 @@ def run_get_batch(
     context_length: int,
     device: str,
 ) -> tuple[Tensor, Tensor]:
-    """Sample a batch of input sequences and labels from a 1D token dataset.
+    """Sample a batch of input sequences and labels from a 1D token array.
+
+    For each sequence:
+    - Pick a random start position
+    - Input:  tokens[start : start + context_length]
+    - Labels: tokens[start+1 : start + context_length + 1]
+      (each label is the next token)
 
     Args:
         dataset: 1D numpy array of token IDs
@@ -228,20 +176,40 @@ def run_get_batch(
         device: torch device string
 
     Returns:
-        (inputs, labels) — both (batch_size, context_length)
+        (inputs, labels) — both (batch_size, context_length) LongTensors
     """
-    # Random starting positions
-    max_start = len(dataset) - context_length - 1
-    starts = np.random.randint(0, max_start, size=batch_size)
+    raise NotImplementedError("TODO: implement get_batch")
 
-    inputs = np.stack([
-        dataset[start:start + context_length] for start in starts
-    ])
-    labels = np.stack([
-        dataset[start + 1:start + context_length + 1] for start in starts
-    ])
 
-    return (
-        torch.tensor(inputs, dtype=torch.long, device=device),
-        torch.tensor(labels, dtype=torch.long, device=device),
-    )
+# ── Cross-entropy loss ──────────────────────────────────────────────────
+
+
+def run_cross_entropy(
+    inputs: Tensor,  # (batch, vocab_size)
+    targets: Tensor,  # (batch,)
+) -> Tensor:
+    """Compute average cross-entropy loss.
+
+    cross_entropy = -mean(log(softmax(inputs)[target]))
+
+    Args:
+        inputs: unnormalized logits (batch, vocab_size)
+        targets: correct class indices (batch,)
+
+    Returns:
+        scalar loss
+    """
+    raise NotImplementedError("TODO: implement cross-entropy loss")
+
+
+# ── Softmax ─────────────────────────────────────────────────────────────
+
+
+def run_softmax(in_features: Tensor, dim: int) -> Tensor:
+    """Compute softmax along the given dimension.
+
+    softmax(x_i) = exp(x_i) / sum(exp(x_j))
+
+    Be numerically stable: subtract max(x) before exp.
+    """
+    raise NotImplementedError("TODO: implement softmax")
