@@ -1,18 +1,30 @@
 # How to Practice — CS336 Self-Study Guide
 
 All `src/cs336/` modules are **skeleton-only**: docstrings + `raise NotImplementedError`.
-You write every line of code yourself. The `lectures/` scripts are tutorial
-material (educational, not assignment solutions).
+You write every line yourself.
 
-## Where to start
+## What to read NOW vs LATER
 
-### 1. Watch Lecture 1, then implement:
+| directory | safe now? | content |
+|-----------|-----------|---------|
+| `src/cs336/` | ✅ | Your canvas — all `raise NotImplementedError` |
+| `lectures/` | ✅ | Conceptual demos, no assignment overlap |
+| `references/` | ⚠️ **LATER** | Implementations that overlap with assignments — read after you finish |
+| `ref/lectures/*.pdf` | ✅ | Official slide decks |
+| `ref/assignments/*.pdf` | ✅ | Official assignment handouts |
+
+## Recommended order
+
+### Step 1: Watch Lecture 1 → implement tokenizer
 ```
-src/cs336/tokenizer/bpe.py     →  BPETokenizer.encode, .decode, run_train_bpe
+src/cs336/tokenizer/bpe.py
+    ├── BPETokenizer.encode()
+    ├── BPETokenizer.decode()
+    └── run_train_bpe()
 ```
-Test: write a small script that trains BPE on a text file and encodes/decodes.
+When done, compare with: `references/lecture_01_tokenization.py`
 
-### 2. Watch Lectures 2-4, then implement (Assignment 1):
+### Step 2: Watch Lectures 2-4 → implement architecture (Assignment 1)
 ```
 src/cs336/architecture/transformer.py
     ├── run_rmsnorm        (~5 lines)
@@ -21,7 +33,7 @@ src/cs336/architecture/transformer.py
     ├── run_embedding      (~1 line)
     ├── run_swiglu         (~6 lines)
     ├── run_scaled_dot_product_attention  (~10 lines)
-    ├── run_rope           (~15 lines)   ← hardest individual function
+    ├── run_rope           (~15 lines)   ← hardest
     ├── run_multihead_self_attention       (~25 lines)
     ├── run_multihead_self_attention_with_rope  (~30 lines)
     ├── run_transformer_block              (~20 lines)
@@ -37,29 +49,27 @@ src/cs336/training/trainer.py
     ├── run_load_checkpoint            (~5 lines)
     └── run_get_batch                  (~12 lines)
 ```
-Test: `pytest tests/` (write your own or use the official A1 tests)
+When done, compare with: `references/lecture_03_architectures.py`
 
-### 3. Watch Lectures 5-8, then implement (Assignment 2):
+### Step 3: Watch Lectures 5-8 → implement systems (Assignment 2)
 ```
 src/cs336/systems/kernels.py
     ├── run_flash_attention2   (Triton kernel, ~80 lines, Linux only)
     ├── run_ddp                (~15 lines)
     └── run_fsdp               (~50 lines)
 ```
+When done, compare with: `references/lecture_06_kernels_triton.py`
 
-### 4. Watch Lectures 9-14 → `lectures/` scripts have concepts + exercises
+### Step 4: Lectures 9-14 → run the safe `lectures/` scripts for concepts
+```
+python lectures/lecture_09_11_scaling_laws.py
+python lectures/lecture_10_inference.py
+python lectures/lecture_12_evaluation.py
+python lectures/lecture_13_14_data.py
+```
 
-### 5. Watch Lectures 15-17 → implement DPO, GRPO (Assignment 5)
-
-## How the project helps
-
-| What | cheat? | purpose |
-|------|--------|---------|
-| `src/cs336/*/` | **No** — all `raise NotImplementedError` | Your implementation canvas |
-| `lectures/lecture_*.py` | No — tutorial demos, not solutions | Run to understand concepts |
-| `ref/lectures/*.pdf` | No — official slides | Reference when stuck |
-| `ref/assignments/*.pdf` | No — official handouts | Read for detailed specs |
-| `.ref/` (gitignored) | No — full official repos | grep for hints if desperate |
+### Step 5: Lectures 15-17 → implement alignment (Assignment 5)
+When done, compare with: `references/lecture_15_16_training.py`
 
 ## Running your code
 
@@ -67,19 +77,17 @@ src/cs336/systems/kernels.py
 cd ~/code/stanford_cs336
 source .venv/bin/activate
 
-# Quick test of one function
-python -c "from cs336.architecture import run_silu; ..."
+# Test one function
+python -c "
+import torch
+from cs336.architecture import run_silu
+# ... call your implementation
+"
 
-# Run the lecture tutorials (educational, not solutions)
-python lectures/lecture_01_tokenization.py
+# Run safe conceptual demos
+python lectures/lecture_02_pytorch_flops.py
+python lectures/lecture_05_gpus_tpus.py
 
-# Write your own test scripts in tests/
-python tests/test_my_tokenizer.py
+# Compare with reference AFTER you finish
+python references/lecture_01_tokenization.py
 ```
-
-## Advice from the course staff
-
-- Debug on CPU first, use GPU only when needed
-- Disable AI autocomplete (Copilot, Cursor Tab) — it hurts learning
-- Study groups OK, but write your own code
-- Don't look at existing implementations online unless the handout says to
